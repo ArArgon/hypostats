@@ -1,13 +1,18 @@
+mod catalog;
 pub mod stats;
 
-// use pgrx::{direct_function_call, AnyArray, Array, Json};
-use crate::stats::pg_class::PostgresClassStat;
 // use pg_sys::FormData_pg_statistic;
 // use pg_sys::SysCacheIdentifier::STATRELATTINH;
+use crate::catalog::heap_tuple::HeapTuple;
+use crate::catalog::relation::Relation;
+// use pgrx::{direct_function_call, AnyArray, Array, Json};
+use crate::stats::pg_class::PostgresClassStat;
 use pgrx::pg_sys;
-use pgrx::pg_sys::{Name, NameData, Oid};
+use pgrx::pg_sys::{AsPgCStr, Datum, FunctionCallInfo, Name, NameData, Oid};
 use pgrx::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::any::Any;
+use std::ffi::{CStr, CString};
 
 ::pgrx::pg_module_magic!();
 
@@ -206,32 +211,41 @@ unsafe fn pg_statistic_stavalues(
 }
 
 #[pg_extern]
-fn pg_class_stat_dump() -> Option<String> {
-    let buf = Spi::connect(|client| {
-        Ok::<_, spi::Error>(
-            client
-                .select(
-                    "select relname::text, relnamespace, reltuples, relpages, relallvisible from pg_class",
-                    None,
-                    &[],
-                )?
-                .map(|data| PostgresClassStat {
-                    relname: data.get(1).unwrap().unwrap(),
-                    relnamespace: data.get_datum_by_ordinal(2).unwrap().value::<Oid>().unwrap().unwrap(),
-                    reltuples: data.get(3).unwrap().unwrap(),
-                    relpages: data.get(4).unwrap().unwrap(),
-                    relallvisible: data.get(5).unwrap().unwrap(),
-                })
-                .collect::<Vec<PostgresClassStat>>(),
-        )
-    }).ok()?;
+fn pg_class_stat_dump(rel_name: String, namespace: Oid) -> Option<PostgresClassStat> {
+    let pg_class = Relation::new(pg_sys::RelationRelationId, pg_sys::RowShareLock as i32);
 
-    Some(serde_json::to_string(&buf).unwrap())
+    // TODO: I don't know how to convert string into `name` datum. C code suggests it is a simple
+    //       cast, but I don't know if such strategy works here.
+    let oid = unsafe { pg_sys::get_relname_relid(rel_name.as_pg_cstr(), namespace) };
+
+    let mut tuple = HeapTuple::from_sys_cache(&pg_class, unsafe {
+        pg_sys::SearchSysCache1(pg_sys::SysCacheIdentifier::RELOID as i32, oid.into())
+    })?;
+
+    let pg_sys::FormData_pg_class {
+        relname,
+        reltuples,
+        relpages,
+        relnamespace,
+        relallvisible,
+        ..
+    } = unsafe { tuple.inner_as() };
+
+    let result = PostgresClassStat {
+        relname: pg_sys::name_data_to_str(relname).into(),
+        reltuples: *reltuples,
+        relpages: *relpages,
+        relnamespace: *relnamespace,
+        relallvisible: *relallvisible,
+    };
+
+    Some(result)
 }
 
 #[pg_extern]
 fn pg_statistic_dump(starelid: i32, staattnum: i16) -> Option<String> {
     let result = unsafe {
+        // https://github.com/postgres/postgres/blob/683df3f4de00bf50b20eae92369e006badf7cd57/src/include/catalog/pg_statistic.h#L135
         let pg_statistic =
             pg_sys::table_open(pg_sys::StatisticRelationId, pg_sys::RowExclusiveLock as i32);
         let tuple = pg_sys::SearchSysCache3(
