@@ -8,6 +8,46 @@ enum ManageType {
     User,
 }
 
+pub(crate) struct ModifyContext {
+    data: Vec<pg_sys::Datum>,
+    null: Vec<bool>,
+    replace: Vec<bool>,
+}
+
+impl ModifyContext {
+    pub fn new(size: usize) -> Self {
+        let mut data = Vec::with_capacity(size);
+        let mut null = Vec::with_capacity(size);
+        let mut replace = Vec::with_capacity(size);
+
+        for _ in 0..size {
+            data.push(pg_sys::Datum::from(0));
+            null.push(false);
+            replace.push(false);
+        }
+
+        Self {
+            data,
+            null,
+            replace,
+        }
+    }
+
+    pub fn replace(&mut self, anum: u32, value: pg_sys::Datum) {
+        let idx = (anum - 1) as usize;
+        assert!(
+            idx < self.data.len(),
+            "access number {} - 1 out of bound, size: {}",
+            anum,
+            self.data.len()
+        );
+
+        self.replace[idx] = true;
+        self.data[idx] = value;
+        self.null[idx] = value.is_null();
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct HeapTuple {
     manage_type: ManageType,
@@ -43,23 +83,25 @@ impl HeapTuple {
     }
 
     pub fn modify_from(
-        old_tup: &HeapTuple,
-        mut data: Vec<pg_sys::Datum>,
-        mut nulls: Vec<bool>,
-        mut do_replaces: Vec<bool>,
+        &self,
+        ModifyContext {
+            mut data,
+            mut null,
+            mut replace,
+        }: ModifyContext,
     ) -> Self {
         Self {
             manage_type: ManageType::User,
             tuple: unsafe {
                 pg_sys::heap_modify_tuple(
-                    old_tup.tuple,
-                    old_tup.descriptor,
+                    self.tuple,
+                    self.descriptor,
                     data.as_mut_ptr(),
-                    nulls.as_mut_ptr(),
-                    do_replaces.as_mut_ptr(),
+                    null.as_mut_ptr(),
+                    replace.as_mut_ptr(),
                 )
             },
-            descriptor: old_tup.descriptor,
+            descriptor: self.descriptor,
         }
     }
 

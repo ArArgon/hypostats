@@ -3,12 +3,12 @@ pub mod stats;
 
 // use pg_sys::FormData_pg_statistic;
 // use pg_sys::SysCacheIdentifier::STATRELATTINH;
-use crate::catalog::heap_tuple::HeapTuple;
-use crate::catalog::relation::Relation;
+use crate::catalog::heap_tuple::{HeapTuple, ModifyContext};
 // use pgrx::{direct_function_call, AnyArray, Array, Json};
+use crate::catalog::relation::Relation;
 use crate::stats::pg_class::PostgresClassStat;
 use pgrx::pg_sys;
-use pgrx::pg_sys::{AsPgCStr, Datum, FunctionCallInfo, Name, NameData, Oid};
+use pgrx::pg_sys::{AsPgCStr, FunctionCallInfo, Name, NameData, Oid};
 use pgrx::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::any::Any;
@@ -208,6 +208,32 @@ unsafe fn pg_statistic_stavalues(
             Some(elemtype),
         )
     }
+}
+
+#[pg_extern]
+fn pg_class_stat_load(
+    rel_name: String,
+    namespace: Oid,
+    rel_tuples: f32,
+    rel_pages: i32,
+) -> Option<String> {
+    let pg_class = Relation::new(pg_sys::RelationRelationId, pg_sys::RowExclusiveLock as i32);
+    let oid = unsafe { pg_sys::get_relname_relid(rel_name.as_pg_cstr(), namespace) };
+    let _table_lock = Relation::new(oid, pg_sys::RowExclusiveLock as i32);
+
+    let tuple = HeapTuple::from_sys_cache(&pg_class, unsafe {
+        pg_sys::SearchSysCache1(pg_sys::SysCacheIdentifier::RELOID as i32, oid.into())
+    })?;
+
+    let att_size = pg_sys::Natts_pg_class as usize;
+    let mut ctx = ModifyContext::new(att_size);
+
+    ctx.replace(pg_sys::Anum_pg_class_reltuples, rel_tuples.into_datum()?);
+    ctx.replace(pg_sys::Anum_pg_class_relpages, rel_pages.into_datum()?);
+
+    // TODO: missing lock for the table (??)
+    pg_class.update_tuple_with_info(tuple.modify_from(ctx));
+    Some(format!("Ok for {:?}", oid))
 }
 
 #[pg_extern]

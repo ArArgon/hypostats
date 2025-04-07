@@ -9,7 +9,7 @@ pub(crate) struct IndexState<'rel> {
 }
 
 impl<'rel> IndexState<'rel> {
-    fn new(rel: &'rel Relation) -> Self {
+    pub(crate) fn new(rel: &'rel Relation) -> Self {
         Self {
             state: unsafe { pg_sys::CatalogOpenIndexes(rel.raw()) },
             phantom_data: Default::default(),

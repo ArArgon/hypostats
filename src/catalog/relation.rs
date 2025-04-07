@@ -24,23 +24,21 @@ impl Relation {
         self.rel
     }
 
+    fn get_index_state(&self) -> IndexState<'_> {
+        IndexState::new(self)
+    }
+
     pub fn get_desc(&self) -> pg_sys::TupleDesc {
         self.rd_att
     }
 
-    pub fn insert_tuple_with_info<'rel>(
-        &'rel mut self,
-        tuple: HeapTuple,
-        index_state: IndexState<'rel>,
-    ) {
+    pub fn insert_tuple_with_info(&self, tuple: HeapTuple) {
+        let index_state = self.get_index_state();
         unsafe { pg_sys::CatalogTupleInsertWithInfo(self.raw(), *tuple, *index_state) };
     }
 
-    pub fn update_tuple_with_info<'rel>(
-        &'rel mut self,
-        tuple: HeapTuple,
-        index_state: IndexState<'rel>,
-    ) {
+    pub fn update_tuple_with_info(&self, tuple: HeapTuple) {
+        let index_state = self.get_index_state();
         unsafe {
             pg_sys::CatalogTupleUpdateWithInfo(
                 self.raw(),
