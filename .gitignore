@@ -4,5 +4,5 @@
 *.iml
 **/*.rs.bk
 Cargo.lock
-python/*.csv
+*.csv
 

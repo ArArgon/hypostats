@@ -1,14 +1,19 @@
+extern crate core;
+
 mod catalog;
 mod hook;
 pub mod stats;
 
 use crate::catalog::heap_tuple::{HeapTuple, ModifyContext};
+use crate::catalog::pg_statistic_ext::{MyInt2vector, PgStatisticExt};
 use crate::catalog::relation::Relation;
 use crate::hook::rel_info;
 use crate::stats::PostgresClassStat;
 use pgrx::pg_sys::AsPgCStr;
 use pgrx::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::ffi::CStr;
+
 ::pgrx::pg_module_magic!();
 
 // Safe to ignore pg_class because of its lazy flags
@@ -232,7 +237,7 @@ fn pg_class_stat_load(
 
     rel_info
         .lock()
-        .ok()?
+        .unwrap()
         .insert(oid, (rel_pages as pg_sys::BlockNumber, rel_tuples as f64));
 
     drop(table_lock);
@@ -266,6 +271,71 @@ fn pg_class_stat_dump(rel_name: String, namespace: pg_sys::Oid) -> Option<Postgr
         relpages: *relpages,
         relnamespace: *relnamespace,
         relallvisible: *relallvisible,
+    };
+
+    Some(result)
+}
+
+#[pg_extern]
+fn pg_statistic_ext_dump(stat_name: String, stat_namespace: pg_sys::Oid) -> Option<PgStatisticExt> {
+    let pg_stat_ext = Relation::new(pg_sys::StatisticExtRelationId, pg_sys::RowShareLock as i32);
+    let name_ptr = unsafe { CStr::from_ptr(stat_name.as_pg_cstr()) };
+
+    let mut tuple = HeapTuple::from_sys_cache(&pg_stat_ext, unsafe {
+        pg_sys::SearchSysCache2(
+            pg_sys::SysCacheIdentifier::STATEXTNAMENSP as i32,
+            name_ptr.as_ptr().into(),
+            stat_namespace.into(),
+        )
+    })?;
+
+    let data: *const pg_sys::FormData_pg_statistic_ext = unsafe { tuple.inner_as() };
+
+    let result = unsafe {
+        let stxname = CStr::from_ptr((*data).stxname.data.as_ptr());
+        let stxkeys = &(*data).stxkeys;
+        let stxkeys = MyInt2vector {
+            vl_len_: stxkeys.vl_len_,
+            ndim: stxkeys.ndim,
+            dataoffset: stxkeys.dataoffset,
+            elemtype: stxkeys.elemtype,
+            dim1: stxkeys.dim1,
+            lbound1: stxkeys.lbound1,
+            values: Vec::from(
+                stxkeys
+                    .values
+                    .as_slice((stxkeys.dim1 * stxkeys.ndim) as usize),
+            ),
+        };
+
+        let kind: Option<Array<core::ffi::c_char>> = tuple.read_dynamic_field(
+            pg_sys::SysCacheIdentifier::STATEXTOID as i32,
+            pg_sys::Anum_pg_statistic_ext_stxkind,
+            pg_sys::BYTEAARRAYOID,
+        );
+
+        PgStatisticExt {
+            oid: (*data).oid,
+            stxrelid: (*data).stxrelid,
+            stxname: stxname.to_str().unwrap().to_owned(),
+            stxnamespace: (*data).stxnamespace,
+            stxowner: (*data).stxowner,
+            stxkeys,
+            stxstattarget: tuple.read_dynamic_field(
+                pg_sys::SysCacheIdentifier::STATEXTOID as i32,
+                pg_sys::Anum_pg_statistic_ext_stxstattarget,
+                pg_sys::INT2OID,
+            ),
+            stxkind: kind.map(|kind| {
+                let byte_arr = kind.as_slice().unwrap();
+                std::str::from_utf8(std::mem::transmute(byte_arr))
+                    .unwrap()
+                    .to_owned()
+            }),
+            // stxexpr is not supported: `pg_get_expr` has a wrong ABI signature.
+            // expr = DirectFunctionCall2(pg_get_expr, attr, some_oid);
+            stxexprs: None,
+        }
     };
 
     Some(result)

@@ -1,5 +1,6 @@
 use crate::catalog::relation::Relation;
-use pgrx::pg_sys;
+use pgrx::pg_sys::Datum;
+use pgrx::{pg_sys, FromDatum};
 use std::ops::Deref;
 
 #[derive(Debug, Eq, PartialEq)]
@@ -111,6 +112,35 @@ impl HeapTuple {
 
     pub unsafe fn inner_as<T>(&mut self) -> &mut T {
         (pg_sys::GETSTRUCT(self.tuple) as *mut T).as_mut().unwrap()
+    }
+
+    pub unsafe fn read_dynamic_field_datum(
+        &self,
+        cache_id: i32,
+        attr_number: u32,
+    ) -> Option<Datum> {
+        let mut is_null = false;
+        let data = pg_sys::SysCacheGetAttr(
+            cache_id,
+            self.tuple,
+            attr_number as pg_sys::AttrNumber,
+            &mut is_null,
+        );
+        if is_null {
+            None
+        } else {
+            Some(data)
+        }
+    }
+
+    pub unsafe fn read_dynamic_field<T: FromDatum>(
+        &self,
+        cache_id: i32,
+        attr_number: u32,
+        type_oid: pg_sys::Oid,
+    ) -> Option<T> {
+        let attr = self.read_dynamic_field_datum(cache_id, attr_number);
+        attr.and_then(|attr| T::from_polymorphic_datum(attr, false, type_oid))
     }
 }
 

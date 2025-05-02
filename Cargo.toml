@@ -12,7 +12,6 @@ path = "./src/bin/pgrx_embed.rs"
 
 [features]
 default = ["pg14"]
-pg12 = ["pgrx/pg12", "pgrx-tests/pg12"]
 pg13 = ["pgrx/pg13", "pgrx-tests/pg13"]
 pg14 = ["pgrx/pg14", "pgrx-tests/pg14"]
 pg15 = ["pgrx/pg15", "pgrx-tests/pg15"]
@@ -21,13 +20,14 @@ pg17 = ["pgrx/pg17", "pgrx-tests/pg17"]
 pg_test = []
 
 [dependencies]
-pgrx = "0.13"
+# Change it to upstream once the PR is merged
+pgrx = { git = "https://github.com/ArArgon/pgrx.git", branch = "feat/add_pg_stat_ext" }
 serde = "1.0.210"
 serde_json = "1.0.128"
 lazy_static = "1.5.0"
 
 [dev-dependencies]
-pgrx-tests = "0.13"
+pgrx-tests = "0.14.1"
 
 [profile.dev]
 panic = "unwind"

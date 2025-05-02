@@ -9,7 +9,7 @@ lazy_static! {
         Mutex::new(HashMap::new());
 }
 
-extern "C" fn relation_hook(
+extern "C-unwind" fn relation_hook(
     _root: *mut pg_sys::PlannerInfo,
     oid: Oid,
     inhparent: bool,

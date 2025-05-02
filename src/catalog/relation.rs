@@ -42,7 +42,10 @@ impl Relation {
     }
 
     pub fn update_tuple_with_info(&self, tuple: HeapTuple) {
-        unsafe { pg_sys::CatalogTupleUpdate(self.raw(), &mut (**tuple).t_self, *tuple) };
+        unsafe {
+            let tuple = tuple.as_mut().unwrap();
+            pg_sys::CatalogTupleUpdate(self.raw(), &mut tuple.t_self, tuple);
+        }
     }
 }
 
